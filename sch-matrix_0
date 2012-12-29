@@ -1,0 +1,190 @@
+#!/usr/bin/perl
+
+### Replicates gschem schematics
+
+### No-Fee License Version 0.1
+
+### Intent
+
+### The intent of this license is to allow for distribution of this
+### software without fee. Usage of this software other than
+### distribution, is unrestricted.
+
+### License
+
+### This software may be distributed provided that no fee is charged.
+### Modification is allowed provided that the resultant work is
+### released with the same license.
+
+### This documentation and software is provided by the author "AS IS"
+### and any express or implied warranties, including, but not limited
+### to, the implied warranties of merchantability and fitness for a
+### particular purpose are disclaimed. In no event shall the author be
+### liable for any direct, indirect, incidental, special, exemplary,
+### or consequential damages (including, but not limited to,
+### procurement of substitute goods or services; loss of use, data, or
+### profits; or business interruption) however caused and on any
+### theory of liability, whether in contract, strict liability, or
+### tort (including negligence or otherwise) arising in any way out of
+### the use of this software, even if advised of the possibility of
+### such damage.
+
+
+use strict;
+use warnings;
+use Carp;
+use Data::Dumper;
+
+# a point field consists of an x and y coordinate
+
+# component fields  [x y selectable angle mirror basename]
+# text fields       [x y color size visibility show_name_value angle alignment num_lines] 
+# net fields        [x1 y1 x2 y2 color]
+# line fields       [x1 y1 x2 y2 color width capstyle dashstyle dashlength dashspace]
+# circle fields     [x y radius color width capstyle dashtype dashlength dashspace filltype fillwidth angle1 pitch1 angle2 pitch2]
+
+my %Pt_fields = ( C => [1, 0, 0, 0, 0],
+		  L => [1, 1, 0, 0, 0, 0, 0, 0],
+		  V => [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+		  T => [1, 0, 0, 0, 0, 0, 0, 0],
+		  N => [1, 1, 0]); # commands
+
+my $Field_type_regex = join('', '[', keys %Pt_fields, ']');
+
+# Defaults for values from the configuration file.
+
+my %Cfg = ( x0       => 500,
+	    y0       => 100,
+	    xoffset  => 1500,
+	    yoffset  => 1000,
+	    last_col => 15,
+	    last_row => 19,
+	    _nets    => []);
+
+my %Refdes;
+
+while (<>) {
+    s/\#.*//; # Remove comments
+    s/^\s*//; # Remove leading spaces
+    s/\s*$//; # Revove trailing spaces
+    next unless length;    # Skip empty lines
+    if (s/\\\s*$//) {      # Remove the continuation backslash and 
+	$_ .= <>;          # append the next line to $_ then 
+	redo unless eof;   # restart the loop block after the conditional
+    }
+    if (s/^net\s*\|\s*//) {
+	push @ { $Cfg{_nets} }, [ split /\s*\|\s*/ ];
+    } elsif (s/^([^_]\w*)\s*\|\s*//) {
+	$Cfg{$1} = $_; # only scalars for now
+    } else {
+	carp "Can not parse line $. in $ARGV";
+    }
+}
+
+# read in the schematic
+
+my $undefined_filename = 0;
+foreach (qw(input_filename output_filename)) {
+    next if defined $Cfg{$_};
+    $undefined_filename = 1;
+    carp "A value for $_ was not defined in the configuration file";
+}
+die if $undefined_filename;
+
+
+$Cfg{_circuit} = [];
+
+open(IN, "$Cfg{input_filename}") or die "Could not open $Cfg{input_filename} for input: $!";
+while (<IN>) {
+    s/\s*$//;           # Revove trailing spaces
+    next unless length; # Skip empty lines
+    if (/^(\s*v\s*\d+\s*\d+\s*)$/) {
+	$Cfg{_version} = $_;
+    } else {
+	push(@ { $Cfg{_circuit}}, $_);
+	if ($_ =~ /^\s*refdes\s*=\s*([A-Za-z]+)(\d+)/) {
+	    $Refdes{$1}{_values} = [] unless defined $Refdes{$1};
+	    push @{$Refdes{$1}{_values}}, $2;
+	}
+    }
+}
+close(IN);
+
+foreach my $refdes (keys %Refdes) {
+    $Refdes{$refdes}{_values} = [sort { $a <=> $b } @{$Refdes{$refdes}{_values}}];
+    $Refdes{$refdes}{_last} = ${$Refdes{$refdes}{_values}}[-1];
+}
+
+open(OUT, ">$Cfg{output_filename}") or die "Could not open $Cfg{output_filename} for output: $!";
+
+print OUT <<"END";
+$Cfg{_version}
+END
+
+my $X = $Cfg{x0};
+my $Y = $Cfg{y0};
+
+foreach my $col (0..$Cfg{last_col}) {
+    $Y = $Cfg{y0};
+    foreach my $row (0..$Cfg{last_row}) {
+	foreach (@ { $Cfg{_circuit} }) {
+	    my $line = $_;
+	    $line =~ s/\#.*//; # Remove comments
+	    $line =~ s/^\s*//; # Remove leading spaces
+	    $line =~ s/\s*$//; # Revove trailing spaces
+	    next unless length($line); # Skip empty lines
+#	    if ($line =~ s/^([CLVTN])\s+//) {
+	    if ($line =~ s/^($Field_type_regex)\s+//) {
+		my $cmd = $1;
+		my @values = split /\s+/, $line;
+		my @fields = @ { $Pt_fields{$cmd} };
+		print OUT "$cmd ";
+		foreach my $pt_p (@fields) {
+		    printf(OUT "%s ", shift(@values)), next unless $pt_p;
+		    printf(OUT "%i %i ", 
+			   shift(@values) + $X, 
+			   shift(@values) + $Y);
+		}
+		print OUT join(' ', @values), "\n";
+	    } else {
+		$line =~ s/^\s*refdes\s*=\s*(\S+)/&refdes($1,$row,$col)/e;
+		print(OUT "$line\n");
+	    }
+	}
+	$Y += $Cfg{yoffset};
+    }
+    $X += $Cfg{xoffset};
+}
+
+
+close(OUT) || die "Could not close $Cfg{output_filename}: $!";
+
+sub refdes ($$$) { 
+    my ($refdes, $row, $col) = @_;
+    croak "Bad refdes |$refdes|" unless $refdes =~ /([A-Za-z]+)(\d+)/;
+    my ($prefix, $ordinal) = ($1, $2);
+    my $last = $Refdes{$prefix}{_last};
+    my @v = (prefix => $prefix, ordinal => $ordinal, _last => $last, row => $row, col => $col);
+    while (@v) {
+	my ($k, $v) = splice @v, 0, 2;
+	print "$k is not defined for refdes $refdes at input line $." unless defined $v;
+    }
+    return sprintf("refdes=%s%i", $prefix, $ordinal + $last * $row + $last * ($Cfg{last_row}+1) * $col);
+}
+
+
+
+
+# Style (adapted from the Perl Cookbook, First Edition, Recipe 12.4)
+
+# 1. Names of functions and local variables are all lowercase.
+# 2. The program's persistent variables (either file lexicals
+#    or package globals) are capitalized.
+# 3. Identifiers with multiple words have each of these
+#    separated by an underscore to make it easier to read.
+# 4. Constants are all uppercase.
+# 5. If the arrow operator (->) is followed by either a
+#    method name or a variable containing a method name then
+#    there is a space before and after the operator.
+
+
