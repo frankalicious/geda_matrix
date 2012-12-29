@@ -158,6 +158,8 @@ foreach (@ { $Cfg{_pcb} }) {
 	&output_element(['Line', '[', $1, ']']);
     } elsif (/^\s*Via\[(.*?)\]/) {
 	&output_element(['Via', '[', $1, ']']);
+    } elsif (/^\s*Text\[(.*?)\]/) {
+	&output_element(['Text', '[', $1, ']']);
     } elsif ($#Element == -1) {
 	print OUT "$_\n";
     } elsif (/\(/) {
@@ -213,6 +215,7 @@ my %Pt_fields;
 BEGIN { 
     %Pt_fields = ( Element => [qw(0 0 0 0 1 0 0 0 0 0)],
 		   Line    => [qw(1 1 0 0 0)],
+		   Text    => [qw(1 0 0 0 0)],
 		   Via     => [qw(1 0 0 0 0 0 0)],
 		   Polygon => [qw(0)],
 		   );
