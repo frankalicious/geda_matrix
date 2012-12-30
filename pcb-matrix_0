@@ -224,11 +224,15 @@ BEGIN {
 sub new_param ($$$$) { 
     my ($type, $left_bracket, $param, $right_bracket, $xoffset, $yoffset) = @_;
     my $element_str = sprintf("%s%s", $type, $left_bracket);
-    my @values = split /\s+/, $param;
+    my @values = split (' ', $param);
     foreach my $pt_field (@ { $Pt_fields{$type} }) {
 	if ($pt_field) {
 	    my ($x, $y) = splice @values, 0, 2;
-	    $element_str .= sprintf("%i %i ", $x + $xoffset, $y + $yoffset);
+
+	    my ($value_x, $unit_x) = ($x =~ /(-?\d+(?:\.\d+)?)(mil|mm)?/);
+	    my ($value_y, $unit_y) = ($y =~ /(-?\d+(?:\.\d+)?)(mil|mm)?/);
+
+	    $element_str .= sprintf("%s %s ", calc_offset($value_x, $xoffset, $unit_x), calc_offset($value_y, $yoffset, $unit_y));
 	} else {
 	    $element_str .= sprintf("%s ", shift(@values));
 	}
@@ -236,7 +240,13 @@ sub new_param ($$$$) {
     return $element_str . "$right_bracket\n";
 }
 
+sub calc_offset {
+    my ($value, $offset, $unit) = @_;
 
+    return sprintf("%s", ($value + $offset)) unless $unit;
+    return sprintf("%smil", ($value + ($offset/100))) if ($unit eq 'mil');
+    return sprintf("%smm",($value + ($offset/100/100) * 2.54)) if ($unit eq 'mm');
+}
 
 # Style (adapted from the Perl Cookbook, First Edition, Recipe 12.4)
 
